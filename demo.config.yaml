@@ -1,0 +1,11 @@
+# Config used by `make demo`. Points at a busy public repo so there's real
+# data to triage without needing access to anything private. Requires a
+# working `gh auth login`.
+
+repos:
+  - owner: cli
+    name: cli
+
+include_drafts: true
+
+poll_interval: 5m
