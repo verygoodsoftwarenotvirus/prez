@@ -9,6 +9,8 @@ review queue never really empties — it stays cluttered with PRs that are
 genuinely waiting on the author, not on you. prez sorts those out and hides them
 by default, leaving you a short list of what actually needs your eyes right now.
 
+The name is exactly what it sounds like: prez makes **PR**s **EZ**.
+
 If you've never set up a command-line tool from source before, that's fine —
 this README walks through every step, and explains *why* each configuration
 option exists so you can decide what you actually need.
@@ -26,7 +28,6 @@ option exists so you can decide what you actually need.
   - [Every field, and the *why* behind it](#every-field-and-the-why-behind-it)
 - [Using the app](#using-the-app)
 - [Troubleshooting](#troubleshooting)
-- [A note on this sandbox's go.mod](#a-note-on-this-sandboxs-gomod)
 - [Extending it](#extending-it)
 
 ---
@@ -59,7 +60,17 @@ variables, or paste any secrets. `gh` handles all of that.
 
 ## Installation
 
-Clone the repo and build the binary:
+The quickest way is `go install`, which downloads, builds, and drops the binary
+into Go's bin directory (`$(go env GOPATH)/bin`, usually `~/go/bin`):
+
+```sh
+go install github.com/verygoodsoftwarenotvirus/prez/cmd/prez@latest
+```
+
+Make sure that directory is on your `PATH` and you can then run `prez` from
+anywhere.
+
+Prefer to build from a clone (e.g. to hack on it)?
 
 ```sh
 git clone https://github.com/verygoodsoftwarenotvirus/prez
@@ -67,22 +78,9 @@ cd prez
 go build -o prez ./cmd/prez
 ```
 
-That produces an executable named `prez` in the current directory. Run it with
-`./prez`. To use it from anywhere, move it onto your `PATH`:
-
-```sh
-# a common spot; make sure this directory is on your PATH
-mv prez ~/.local/bin/prez
-```
-
-If you have `make`, `make build` compiles all packages as a sanity check, though
-`go build -o prez ./cmd/prez` is what actually gives you the runnable binary.
-
-> **Heads up:** this repo ships with a few `replace` directives at the bottom of
-> `go.mod` (a build-environment workaround — see
-> [the note below](#a-note-on-this-sandboxs-gomod)). Because of them, installing
-> straight from the network with `go install …@latest` may not work as-is.
-> Cloning and building locally, as above, always does.
+That produces a `prez` executable in the current directory; run it with `./prez`
+or move it onto your `PATH`. If you have `make`, `make build` compiles all
+packages as a sanity check.
 
 ---
 
@@ -92,11 +90,11 @@ If you have `make`, `make build` compiles all packages as a sanity check, though
 config with every option set to its default:
 
 ```sh
-./prez init
+prez init
 ```
 
 This creates `~/.config/prez/config.yaml`. (Want it elsewhere? Use
-`./prez init --config ./my-config.yaml`.) `init` refuses to overwrite an
+`prez init --config ./my-config.yaml`.) `init` refuses to overwrite an
 existing file, so it's safe to run.
 
 **2. Tell it which repos to watch.** Open the file it just made and fill in the
@@ -115,13 +113,13 @@ the GitHub CLI's own repository:
 **3. Run it.**
 
 ```sh
-./prez
+prez
 ```
 
 prez looks up your GitHub login (via `gh`), fetches the open PRs, decides which
 ones need your attention, and drops you into the list. If you put your config
 somewhere other than the default path, point at it with
-`./prez --config ./my-config.yaml`.
+`prez --config ./my-config.yaml`.
 
 That's the whole loop. Everything below is detail you can reach for as you want
 to narrow the list down or watch several contexts at once.
@@ -412,18 +410,6 @@ missing the `read:org` scope needed to read team membership. Add it with
 **Nothing shows up** — check whether everything is `WAITING` (press `w` to
 reveal), whether an `authors` allowlist is filtering out the PRs you expected, or
 whether `hide_failing`/`include_drafts` are excluding them.
-
----
-
-## A note on this sandbox's go.mod
-
-This was built and tested in an environment without access to
-`proxy.golang.org`, so `go.mod` has `replace` directives pointing a few
-`golang.org/x/*` transitive dependencies at their GitHub mirrors
-(`github.com/golang/sys`, etc.) as a workaround. On a machine with normal
-internet access these aren't necessary — feel free to delete the `replace`
-block at the bottom of `go.mod` and run `go mod tidy`. (Doing so is also what
-makes installing straight from the network work cleanly.)
 
 ---
 
