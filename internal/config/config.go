@@ -67,6 +67,36 @@ type Config struct {
 	PollInterval  time.Duration      `yaml:"poll_interval"`
 }
 
+// defaultProfileName is the name given to the lone profile a legacy
+// single-config file is migrated into.
+const defaultProfileName = "default"
+
+// Profile is a named Config. Profiles are shown as tabs in the TUI, letting
+// one prez instance triage several disjoint contexts (work, personal, a side
+// project) without juggling files or restarting.
+type Profile struct {
+	Name   string `yaml:"name"`
+	Config `yaml:",inline"`
+}
+
+// file is the on-disk shape: an ordered list of named profiles.
+type file struct {
+	Profiles []Profile `yaml:"profiles"`
+}
+
+// profileEnvelope captures a profile's name and defers its Config body to a
+// second decode pass, so each profile can be seeded with defaults() before its
+// keys are applied — preserving the omitted-vs-explicit-false semantics for
+// fields like review_filter.enabled.
+type profileEnvelope struct {
+	Rest map[string]any `yaml:",inline"`
+	Name string         `yaml:"name"`
+}
+
+type fileEnvelope struct {
+	Profiles []profileEnvelope `yaml:"profiles"`
+}
+
 func defaults() Config {
 	return Config{
 		Authors:      AuthorsConfig{Exclude: []string{"app/dependabot"}},
@@ -75,16 +105,66 @@ func defaults() Config {
 	}
 }
 
-// Load reads and validates a config file at path.
-func Load(path string) (Config, error) {
-	cfg := defaults()
-
+// Load reads and validates the config file at path, returning its profiles in
+// on-disk order. A legacy single-config file (no 'profiles' key) is parsed as
+// one Config, wrapped in a lone profile named "default", and rewritten in the
+// profiles shape so the next load takes the fast path.
+func Load(path string) ([]Profile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
+		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
 
-	if err = yaml.Unmarshal(data, &cfg); err != nil {
+	// A legacy single-config file has no 'profiles' key, so it decodes here as
+	// zero profiles (goccy ignores unknown top-level keys); a file that isn't
+	// valid as the profiles shape at all lands here too. Either way, fall back
+	// to parsing it as one Config and migrate it in place.
+	var env fileEnvelope
+	if perr := yaml.Unmarshal(data, &env); perr != nil || len(env.Profiles) == 0 {
+		cfg, cerr := decodeConfig(path, data)
+		if cerr != nil {
+			return nil, cerr
+		}
+		profiles := []Profile{{Name: defaultProfileName, Config: cfg}}
+		if serr := Save(path, profiles); serr != nil {
+			return nil, fmt.Errorf("migrating config %s to profiles: %w", path, serr)
+		}
+		return profiles, nil
+	}
+
+	profiles := make([]Profile, 0, len(env.Profiles))
+	seen := make(map[string]struct{}, len(env.Profiles))
+	for i := range env.Profiles {
+		pe := &env.Profiles[i]
+		if pe.Name == "" {
+			return nil, fmt.Errorf("config %s: profiles[%d] needs a 'name'", path, i)
+		}
+		if _, dup := seen[pe.Name]; dup {
+			return nil, fmt.Errorf("config %s: duplicate profile name %q", path, pe.Name)
+		}
+		seen[pe.Name] = struct{}{}
+
+		body, merr := yaml.Marshal(pe.Rest)
+		if merr != nil {
+			return nil, fmt.Errorf("config %s: profile %q: %w", path, pe.Name, merr)
+		}
+		cfg, cerr := decodeConfig(path, body)
+		if cerr != nil {
+			return nil, fmt.Errorf("config %s: profile %q: %w", path, pe.Name, cerr)
+		}
+		profiles = append(profiles, Profile{Name: pe.Name, Config: cfg})
+	}
+
+	return profiles, nil
+}
+
+// decodeConfig parses a single Config body over freshly-seeded defaults and
+// validates it. Seeding before the unmarshal is what lets an omitted key keep
+// its default while an explicit value (including false) overrides it.
+func decodeConfig(path string, data []byte) (Config, error) {
+	cfg := defaults()
+
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
@@ -108,6 +188,27 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+// Save writes profiles to path as YAML, creating parent directories as needed.
+// It backs the legacy migration and any future profile edits. Note that this
+// emits plain YAML — the annotated comments in a hand-written or Init-generated
+// file are not preserved across a rewrite.
+func Save(path string, profiles []Profile) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(file{Profiles: profiles})
+	if err != nil {
+		return fmt.Errorf("encoding config: %w", err)
+	}
+
+	if err = os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("writing config %s: %w", path, err)
+	}
+
+	return nil
+}
+
 // DefaultPath returns ~/.config/prez/config.yaml.
 func DefaultPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -124,44 +225,51 @@ func DefaultPath() (string, error) {
 const annotatedTemplate = `# prez configuration.
 # Docs live alongside each field below. Delete what you don't need.
 
-# repos: the PRs to triage are pulled from these repositories. Required;
-# at least one entry with both owner and name.
-repos:
-  - owner: ""
-    name: ""
+# profiles: one or more named contexts to triage, each shown as its own tab in
+# the TUI. Add more entries to track work, personal, and side-project PRs side
+# by side; every field below repeats per profile.
+profiles:
+  - name: default
 
-# authors: restrict which PR authors appear. When both teams and include are
-# empty the allowlist is off and every author is shown; exclude always applies.
-authors:
-  # teams whose current members are shown (resolved from the GitHub API at
-  # startup). Requires the gh token to have the read:org scope.
-  teams: []
-  #  - org: ""
-  #    slug: ""
-  # include: individual logins shown on top of any team members.
-  include: []
-  # exclude: logins dropped even if a team or include would allow them.
-  exclude:
-    - app/dependabot
+    # repos: the PRs to triage are pulled from these repositories. Required;
+    # at least one entry with both owner and name.
+    repos:
+      - owner: ""
+        name: ""
 
-# checks: filter by CI status.
-checks:
-  # hide_failing drops PRs whose overall check rollup is FAILURE or ERROR.
-  # Successful, pending, and check-less PRs are always shown.
-  hide_failing: false
+    # authors: restrict which PR authors appear. When both teams and include
+    # are empty the allowlist is off and every author is shown; exclude always
+    # applies.
+    authors:
+      # teams whose current members are shown (resolved from the GitHub API at
+      # startup). Requires the gh token to have the read:org scope.
+      teams: []
+      #  - org: ""
+      #    slug: ""
+      # include: individual logins shown on top of any team members.
+      include: []
+      # exclude: logins dropped even if a team or include would allow them.
+      exclude:
+        - app/dependabot
 
-# review_filter toggles prez's defining behavior: filtering PRs by whether
-# they need your review.
-review_filter:
-  # enabled: when false, shows every PR that passes the other filters
-  # regardless of review state.
-  enabled: true
+    # checks: filter by CI status.
+    checks:
+      # hide_failing drops PRs whose overall check rollup is FAILURE or ERROR.
+      # Successful, pending, and check-less PRs are always shown.
+      hide_failing: false
 
-# include_drafts: when true, draft PRs are shown too.
-include_drafts: false
+    # review_filter toggles prez's defining behavior: filtering PRs by whether
+    # they need your review.
+    review_filter:
+      # enabled: when false, shows every PR that passes the other filters
+      # regardless of review state.
+      enabled: true
 
-# poll_interval: how often to refresh, as a Go duration (e.g. 30s, 5m, 1h).
-poll_interval: 5m
+    # include_drafts: when true, draft PRs are shown too.
+    include_drafts: false
+
+    # poll_interval: how often to refresh, as a Go duration (e.g. 30s, 5m, 1h).
+    poll_interval: 5m
 `
 
 // Init writes the annotated config template to path, creating parent
@@ -173,11 +281,11 @@ func Init(path string) error {
 		return fmt.Errorf("checking config path %s: %w", path, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(annotatedTemplate), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(annotatedTemplate), 0o600); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
 

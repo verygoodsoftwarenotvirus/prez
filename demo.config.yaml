@@ -1,11 +1,33 @@
-# Config used by `make demo`. Points at a busy public repo so there's real
-# data to triage without needing access to anything private. Requires a
-# working `gh auth login`.
-
-repos:
+profiles:
+- name: default
+  repos:
   - owner: cli
     name: cli
-
-include_drafts: true
-
-poll_interval: 5m
+  authors:
+    teams: []
+    include: []
+    exclude:
+    - app/dependabot
+  checks:
+    hide_failing: false
+  review_filter:
+    enabled: true
+  include_drafts: true
+  poll_interval: 5m0s
+- name: charm
+  repos:
+  - owner: charmbracelet
+    name: bubbletea
+  - owner: charmbracelet
+    name: lipgloss
+  authors:
+    teams: []
+    include: []
+    exclude:
+    - app/dependabot
+  checks:
+    hide_failing: true
+  review_filter:
+    enabled: false
+  include_drafts: false
+  poll_interval: 2m0s

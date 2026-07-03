@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,13 +18,27 @@ func writeTemp(t *testing.T, contents string) string {
 	return path
 }
 
-func TestLoadAppliesDefaults(t *testing.T) {
-	path := writeTemp(t, "repos:\n  - owner: acme\n    name: some-service\n")
-
-	cfg, err := Load(path)
+// loadOne loads a legacy single-config fixture and returns the single migrated
+// profile's Config, asserting the file was wrapped as a lone "default" profile.
+func loadOne(t *testing.T, contents string) Config {
+	t.Helper()
+	path := writeTemp(t, contents)
+	profiles, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
+	if len(profiles) != 1 {
+		t.Fatalf("len(profiles) = %d, want 1", len(profiles))
+	}
+	if profiles[0].Name != defaultProfileName {
+		t.Fatalf("profiles[0].Name = %q, want %q", profiles[0].Name, defaultProfileName)
+	}
+	return profiles[0].Config
+}
+
+func TestLoadAppliesDefaults(t *testing.T) {
+	cfg := loadOne(t, "repos:\n  - owner: acme\n    name: some-service\n")
+
 	if cfg.PollInterval != 5*time.Minute {
 		t.Errorf("PollInterval = %v, want 5m default", cfg.PollInterval)
 	}
@@ -42,7 +57,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 }
 
 func TestLoadOverridesDefaults(t *testing.T) {
-	path := writeTemp(t, `
+	cfg := loadOne(t, `
 repos:
   - owner: acme
     name: some-service
@@ -60,10 +75,6 @@ include_drafts: true
 poll_interval: 90s
 `)
 
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
 	if cfg.PollInterval != 90*time.Second {
 		t.Errorf("PollInterval = %v, want 90s", cfg.PollInterval)
 	}
@@ -89,18 +100,13 @@ poll_interval: 90s
 
 // A partial authors block must not wipe out the default exclude list.
 func TestLoadPreservesDefaultExcludeWhenOmitted(t *testing.T) {
-	path := writeTemp(t, `
+	cfg := loadOne(t, `
 repos:
   - owner: acme
     name: some-service
 authors:
   include: [someone]
 `)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
 	if len(cfg.Authors.Exclude) != 1 || cfg.Authors.Exclude[0] != "app/dependabot" {
 		t.Errorf("Authors.Exclude = %v, want default dependabot exclusion preserved", cfg.Authors.Exclude)
 	}
@@ -137,5 +143,133 @@ func TestLoadRequiresOwnerAndName(t *testing.T) {
 func TestLoadMissingFile(t *testing.T) {
 	if _, err := Load("/nonexistent/path/config.yaml"); err == nil {
 		t.Error("expected an error for a missing config file")
+	}
+}
+
+func TestLoadMultipleProfiles(t *testing.T) {
+	path := writeTemp(t, `
+profiles:
+  - name: work
+    repos:
+      - owner: acme
+        name: some-service
+    review_filter:
+      enabled: false
+  - name: personal
+    repos:
+      - owner: verygoodsoftwarenotvirus
+        name: prez
+    poll_interval: 30s
+`)
+
+	profiles, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("len(profiles) = %d, want 2", len(profiles))
+	}
+
+	// Order is preserved.
+	if profiles[0].Name != "work" || profiles[1].Name != "personal" {
+		t.Fatalf("profile names = %q, %q; want work, personal", profiles[0].Name, profiles[1].Name)
+	}
+
+	// Per-profile defaults apply independently: work omits poll_interval so it
+	// gets the 5m default; personal omits authors so it keeps the dependabot
+	// exclude; work's explicit enabled:false must stick.
+	work, personal := profiles[0].Config, profiles[1].Config
+	if work.PollInterval != 5*time.Minute {
+		t.Errorf("work.PollInterval = %v, want 5m default", work.PollInterval)
+	}
+	if work.ReviewFilter.Enabled {
+		t.Error("work.ReviewFilter.Enabled should stay false")
+	}
+	if personal.PollInterval != 30*time.Second {
+		t.Errorf("personal.PollInterval = %v, want 30s", personal.PollInterval)
+	}
+	if len(personal.Authors.Exclude) != 1 || personal.Authors.Exclude[0] != "app/dependabot" {
+		t.Errorf("personal.Authors.Exclude = %v, want default dependabot exclusion", personal.Authors.Exclude)
+	}
+}
+
+func TestLoadMigratesLegacyConfigOnDisk(t *testing.T) {
+	path := writeTemp(t, "repos:\n  - owner: acme\n    name: some-service\npoll_interval: 90s\n")
+
+	profiles, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Name != defaultProfileName {
+		t.Fatalf("profiles = %+v, want one %q profile", profiles, defaultProfileName)
+	}
+
+	// The file on disk was rewritten in the profiles shape.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "profiles:") || !strings.Contains(string(data), "name: default") {
+		t.Errorf("migrated file does not contain a profiles/default block:\n%s", data)
+	}
+
+	// Reloading the rewritten file yields the same profile.
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload error = %v", err)
+	}
+	if len(reloaded) != 1 || reloaded[0].Name != defaultProfileName {
+		t.Fatalf("reloaded = %+v, want one %q profile", reloaded, defaultProfileName)
+	}
+	if reloaded[0].PollInterval != 90*time.Second {
+		t.Errorf("reloaded PollInterval = %v, want 90s preserved across migration", reloaded[0].PollInterval)
+	}
+	if reloaded[0].Repos[0] != (Repo{Owner: "acme", Name: "some-service"}) {
+		t.Errorf("reloaded repo = %v, want acme/some-service", reloaded[0].Repos[0])
+	}
+}
+
+func TestLoadRequiresProfileName(t *testing.T) {
+	path := writeTemp(t, `
+profiles:
+  - repos:
+      - owner: acme
+        name: some-service
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected an error for a profile missing 'name'")
+	}
+}
+
+func TestLoadRejectsDuplicateProfileNames(t *testing.T) {
+	path := writeTemp(t, `
+profiles:
+  - name: work
+    repos:
+      - owner: acme
+        name: some-service
+  - name: work
+    repos:
+      - owner: verygoodsoftwarenotvirus
+        name: prez
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected an error for duplicate profile names")
+	}
+}
+
+func TestLoadValidatesEachProfilesRepos(t *testing.T) {
+	path := writeTemp(t, `
+profiles:
+  - name: work
+    repos:
+      - owner: acme
+        name: some-service
+  - name: personal
+    review_filter:
+      enabled: true
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected an error for a profile with no repos")
 	}
 }
