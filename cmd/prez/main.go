@@ -37,7 +37,7 @@ func run() error {
 	path := flag.String("config", defaultPath, "path to config.yaml")
 	flag.Parse()
 
-	cfg, err := config.Load(*path)
+	profiles, err := config.Load(*path)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func run() error {
 
 	client := ghclient.New(token)
 
-	model := tui.New(cfg, client)
+	model := tui.New(profiles, client)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err

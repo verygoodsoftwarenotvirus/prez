@@ -11,6 +11,9 @@ var (
 	helpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 
+	tabActive   = lipgloss.NewStyle().Padding(0, 2).Bold(true).Reverse(true)
+	tabInactive = lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("241"))
+
 	badgeBase = lipgloss.NewStyle().
 			Padding(0, 1).
 			Bold(true).
