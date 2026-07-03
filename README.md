@@ -29,7 +29,7 @@ out as test cases.
 1. Install and authenticate the GitHub CLI if you haven't already:
    `gh auth login`. prez shells out to `gh auth token` rather than
    managing its own credentials.
-2. Copy `config.example.yaml` to `~/.config/prez/config.yaml` (or
+2. Copy `demo.config.yaml` to `~/.config/prez/config.yaml` (or
    anywhere, and pass `--config path/to/file.yaml`) and list the repos you
    want to watch:
 
@@ -54,7 +54,7 @@ out as test cases.
    - **`review_filter`** — set `enabled: false` to turn off the review-state
      filtering below and just see every PR matching the other filters.
 
-   See `config.example.yaml` for the full annotated schema.
+   See `demo.config.yaml` for a working example.
 
 3. Build and run:
 
