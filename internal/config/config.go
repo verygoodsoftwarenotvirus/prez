@@ -58,7 +58,13 @@ type ReviewFilterConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// ProviderGitHub is the only forge prez currently talks to. The provider field
+// exists so a config can later opt into gitlab, codeberg, and friends without a
+// schema break; for now any other value is rejected at load time.
+const ProviderGitHub = "github"
+
 type Config struct {
+	Provider      string             `yaml:"provider"`
 	Repos         []Repo             `yaml:"repos"`
 	Authors       AuthorsConfig      `yaml:"authors"`
 	Checks        ChecksConfig       `yaml:"checks"`
@@ -99,6 +105,7 @@ type fileEnvelope struct {
 
 func defaults() Config {
 	return Config{
+		Provider:     ProviderGitHub,
 		Authors:      AuthorsConfig{Exclude: []string{"app/dependabot"}},
 		ReviewFilter: ReviewFilterConfig{Enabled: true},
 		PollInterval: 5 * time.Minute,
@@ -134,6 +141,9 @@ func Load(path string) ([]Profile, error) {
 
 	profiles := make([]Profile, 0, len(env.Profiles))
 	seen := make(map[string]struct{}, len(env.Profiles))
+	// rewrite becomes true when a profile omits the provider key, so we can
+	// persist the defaulted-in value and take the fast path next load.
+	rewrite := false
 	for i := range env.Profiles {
 		pe := &env.Profiles[i]
 		if pe.Name == "" {
@@ -144,6 +154,10 @@ func Load(path string) ([]Profile, error) {
 		}
 		seen[pe.Name] = struct{}{}
 
+		if _, ok := pe.Rest["provider"]; !ok {
+			rewrite = true
+		}
+
 		body, merr := yaml.Marshal(pe.Rest)
 		if merr != nil {
 			return nil, fmt.Errorf("config %s: profile %q: %w", path, pe.Name, merr)
@@ -153,6 +167,12 @@ func Load(path string) ([]Profile, error) {
 			return nil, fmt.Errorf("config %s: profile %q: %w", path, pe.Name, cerr)
 		}
 		profiles = append(profiles, Profile{Name: pe.Name, Config: cfg})
+	}
+
+	if rewrite {
+		if serr := Save(path, profiles); serr != nil {
+			return nil, fmt.Errorf("backfilling provider in config %s: %w", path, serr)
+		}
 	}
 
 	return profiles, nil
@@ -166,6 +186,13 @@ func decodeConfig(path string, data []byte) (Config, error) {
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
+	}
+
+	if cfg.Provider == "" {
+		cfg.Provider = ProviderGitHub
+	}
+	if cfg.Provider != ProviderGitHub {
+		return Config{}, fmt.Errorf("config %s: unsupported provider %q (only %q is supported)", path, cfg.Provider, ProviderGitHub)
 	}
 
 	if len(cfg.Repos) == 0 {
@@ -230,6 +257,11 @@ const annotatedTemplate = `# prez configuration.
 # by side; every field below repeats per profile.
 profiles:
   - name: default
+
+    # provider: the forge these repos live on. Only "github" is supported today;
+    # the field is here so other forges can be added later without a schema
+    # break. Omit it and prez fills in "github".
+    provider: github
 
     # repos: the PRs to triage are pulled from these repositories. Required;
     # at least one entry with both owner and name.

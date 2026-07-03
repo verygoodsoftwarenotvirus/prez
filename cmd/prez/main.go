@@ -10,8 +10,7 @@ import (
 	"os"
 
 	"github.com/verygoodsoftwarenotvirus/prez/internal/config"
-	"github.com/verygoodsoftwarenotvirus/prez/internal/ghauth"
-	"github.com/verygoodsoftwarenotvirus/prez/internal/ghclient"
+	"github.com/verygoodsoftwarenotvirus/prez/internal/provider"
 	"github.com/verygoodsoftwarenotvirus/prez/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -42,14 +41,12 @@ func run() error {
 		return err
 	}
 
-	token, err := ghauth.Token(context.Background())
+	providers, err := provider.Resolve(context.Background(), profiles)
 	if err != nil {
 		return err
 	}
 
-	client := ghclient.New(token)
-
-	model := tui.New(profiles, client)
+	model := tui.New(profiles, providers)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err

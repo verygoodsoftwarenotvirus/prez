@@ -22,20 +22,29 @@ type Review struct {
 	CommitOID   string
 }
 
+// CheckStatus is a provider-neutral view of a PR's overall CI/check rollup,
+// laundered from whatever vocabulary the underlying forge uses. The zero value
+// is CheckNone, matching a PR with no checks configured.
+type CheckStatus int
+
+const (
+	CheckNone CheckStatus = iota // no checks configured on the PR
+	CheckPassing
+	CheckFailing
+	CheckPending
+)
+
 // PullRequest is a provider-agnostic snapshot of an open PR at fetch time.
 type PullRequest struct {
-	UpdatedAt time.Time
-	Repo      string
-	Title     string
-	URL       string
-	Author    string
-	HeadOID   string
-	// CheckStatus is GitHub's overall status-check rollup state for the head
-	// commit (SUCCESS, FAILURE, ERROR, PENDING, EXPECTED), or "" when the PR
-	// has no checks at all.
-	CheckStatus        string
+	UpdatedAt          time.Time
+	Repo               string
+	Title              string
+	URL                string
+	Author             string
+	HeadOID            string
 	Reviews            []Review
 	RequestedReviewers []string
+	CheckStatus        CheckStatus
 	Number             int
 	IsDraft            bool
 }
@@ -43,12 +52,7 @@ type PullRequest struct {
 // ChecksFailing reports whether the PR's overall check rollup is in a failed
 // state, as opposed to passing, pending, or having no checks configured.
 func (pr PullRequest) ChecksFailing() bool {
-	switch pr.CheckStatus {
-	case "FAILURE", "ERROR":
-		return true
-	default:
-		return false
-	}
+	return pr.CheckStatus == CheckFailing
 }
 
 // Status is the triage outcome for a PR from a specific viewer's perspective.

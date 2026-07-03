@@ -154,7 +154,7 @@ func convert(owner, name string, n prNode) triage.PullRequest {
 	}
 
 	if commits := n.Commits.Nodes; len(commits) > 0 {
-		pr.CheckStatus = string(commits[0].Commit.StatusCheckRollup.State)
+		pr.CheckStatus = checkStatus(string(commits[0].Commit.StatusCheckRollup.State))
 	}
 
 	for i := range n.Reviews.Nodes {
@@ -174,6 +174,22 @@ func convert(owner, name string, n prNode) triage.PullRequest {
 	}
 
 	return pr
+}
+
+// checkStatus launders GitHub's status-check rollup state into the
+// provider-neutral triage.CheckStatus. An empty or unknown state (a PR with no
+// checks) maps to triage.CheckNone.
+func checkStatus(rollup string) triage.CheckStatus {
+	switch rollup {
+	case "SUCCESS":
+		return triage.CheckPassing
+	case "FAILURE", "ERROR":
+		return triage.CheckFailing
+	case "PENDING", "EXPECTED":
+		return triage.CheckPending
+	default:
+		return triage.CheckNone
+	}
 }
 
 type teamMembersQuery struct {

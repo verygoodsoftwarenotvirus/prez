@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/verygoodsoftwarenotvirus/prez/internal/config"
+	"github.com/verygoodsoftwarenotvirus/prez/internal/provider"
 	"github.com/verygoodsoftwarenotvirus/prez/internal/triage"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -18,14 +19,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Source is the subset of ghclient.Client the TUI depends on. Defined here,
-// at the consumer, so the TUI can be driven by a fake in tests without
-// pulling in any GitHub-specific types.
-type Source interface {
-	Viewer(ctx context.Context) (string, error)
-	OpenPullRequests(ctx context.Context, owner, name string) ([]triage.PullRequest, error)
-	TeamMembers(ctx context.Context, org, slug string) ([]string, error)
-}
+// Source is the forge contract each tab fetches through. It aliases
+// provider.Provider so the TUI can be driven by a hand-written fake in tests
+// without pulling in any forge-specific types.
+type Source = provider.Provider
 
 type prsFetchedMsg struct {
 	err            error
@@ -72,16 +69,17 @@ func newList() list.Model {
 	return l
 }
 
-// New builds the initial Model, one tab per profile. Call tea.NewProgram(m) to
+// New builds the initial Model, one tab per profile, each fetching through the
+// provider at the same index (see provider.Resolve). Call tea.NewProgram(m) to
 // run it.
-func New(profiles []config.Profile, src Source) Model {
+func New(profiles []config.Profile, providers []provider.Provider) Model {
 	tabs := make([]tab, 0, len(profiles))
 	for i := range profiles {
 		tabs = append(tabs, tab{
 			name:      profiles[i].Name,
 			list:      newList(),
 			cfg:       profiles[i].Config,
-			src:       src,
+			src:       providers[i],
 			evaluator: triage.DefaultEvaluator{},
 			loading:   true,
 		})

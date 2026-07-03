@@ -137,24 +137,21 @@ func TestFilterIncludeAuthors(t *testing.T) {
 func TestFilterHideFailing(t *testing.T) {
 	f := Filter{HideFailing: true}
 
-	if f.Allows(PullRequest{Author: "a", CheckStatus: "FAILURE"}) {
-		t.Error("FAILURE checks should be hidden when HideFailing is set")
+	if f.Allows(PullRequest{Author: "a", CheckStatus: CheckFailing}) {
+		t.Error("failing checks should be hidden when HideFailing is set")
 	}
-	if f.Allows(PullRequest{Author: "a", CheckStatus: "ERROR"}) {
-		t.Error("ERROR checks should be hidden when HideFailing is set")
+	if !f.Allows(PullRequest{Author: "a", CheckStatus: CheckPending}) {
+		t.Error("pending checks should still be shown")
 	}
-	if !f.Allows(PullRequest{Author: "a", CheckStatus: "PENDING"}) {
-		t.Error("PENDING checks should still be shown")
+	if !f.Allows(PullRequest{Author: "a", CheckStatus: CheckPassing}) {
+		t.Error("passing checks should be shown")
 	}
-	if !f.Allows(PullRequest{Author: "a", CheckStatus: "SUCCESS"}) {
-		t.Error("SUCCESS checks should be shown")
-	}
-	if !f.Allows(PullRequest{Author: "a", CheckStatus: ""}) {
+	if !f.Allows(PullRequest{Author: "a", CheckStatus: CheckNone}) {
 		t.Error("PRs with no checks should be shown")
 	}
 
 	// Disabled by default: a failing PR passes when HideFailing is false.
-	if !(Filter{}).Allows(PullRequest{Author: "a", CheckStatus: "FAILURE"}) {
+	if !(Filter{}).Allows(PullRequest{Author: "a", CheckStatus: CheckFailing}) {
 		t.Error("failing checks should pass when HideFailing is off")
 	}
 }

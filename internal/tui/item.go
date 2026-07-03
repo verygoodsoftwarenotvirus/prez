@@ -26,14 +26,16 @@ func (i item) Description() string {
 
 // checkLabel renders a compact indicator for a PR's overall check rollup, or
 // "" when the PR has no checks.
-func checkLabel(state string) string {
-	switch state {
-	case "SUCCESS":
+func checkLabel(status triage.CheckStatus) string {
+	switch status {
+	case triage.CheckPassing:
 		return "checks ✓"
-	case "FAILURE", "ERROR":
+	case triage.CheckFailing:
 		return "checks ✗"
-	case "PENDING", "EXPECTED":
+	case triage.CheckPending:
 		return "checks …"
+	case triage.CheckNone:
+		return ""
 	default:
 		return ""
 	}

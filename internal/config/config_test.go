@@ -54,6 +54,51 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.IncludeDrafts {
 		t.Error("IncludeDrafts should default to false")
 	}
+	if cfg.Provider != ProviderGitHub {
+		t.Errorf("Provider = %q, want %q default", cfg.Provider, ProviderGitHub)
+	}
+}
+
+func TestLoadRejectsUnsupportedProvider(t *testing.T) {
+	path := writeTemp(t, "provider: gitlab\nrepos:\n  - owner: acme\n    name: some-service\n")
+	if _, err := Load(path); err == nil {
+		t.Error("expected an error for an unsupported provider")
+	}
+}
+
+func TestLoadAcceptsExplicitGitHubProvider(t *testing.T) {
+	cfg := loadOne(t, "provider: github\nrepos:\n  - owner: acme\n    name: some-service\n")
+	if cfg.Provider != ProviderGitHub {
+		t.Errorf("Provider = %q, want %q", cfg.Provider, ProviderGitHub)
+	}
+}
+
+// A profiles file that predates the provider field must be backfilled with the
+// github default and rewritten on disk so the next load takes the fast path.
+func TestLoadBackfillsMissingProviderOnDisk(t *testing.T) {
+	path := writeTemp(t, `
+profiles:
+  - name: work
+    repos:
+      - owner: acme
+        name: some-service
+`)
+
+	profiles, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Provider != ProviderGitHub {
+		t.Fatalf("profiles = %+v, want one github-provider profile", profiles)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "provider: github") {
+		t.Errorf("rewritten file does not contain the backfilled provider:\n%s", data)
+	}
 }
 
 func TestLoadOverridesDefaults(t *testing.T) {

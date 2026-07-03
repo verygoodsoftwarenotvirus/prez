@@ -1,5 +1,6 @@
 profiles:
 - name: default
+  provider: github
   repos:
   - owner: cli
     name: cli
@@ -15,6 +16,7 @@ profiles:
   include_drafts: true
   poll_interval: 5m0s
 - name: charm
+  provider: github
   repos:
   - owner: charmbracelet
     name: bubbletea
