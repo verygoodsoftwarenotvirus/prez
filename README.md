@@ -56,6 +56,14 @@ Three things, all free:
 You do **not** need to create a personal access token, set environment
 variables, or paste any secrets. `gh` handles all of that.
 
+> **Have a `GITHUB_TOKEN` environment variable set?** `gh` prefers it over its
+> own stored login, which breaks `gh auth refresh` (it'll refuse to touch
+> credentials it isn't managing) and means prez picks up whatever scopes that
+> token happens to have. Unset it — `grep -rn "GITHUB_TOKEN" ~/.zshrc
+> ~/.zprofile ~/.bash_profile ~/.bashrc` finds where it's exported — then run
+> `gh auth login` (or `gh auth refresh -s read:org`) so `gh auth token` is the
+> one source of truth.
+
 ---
 
 ## Installation
